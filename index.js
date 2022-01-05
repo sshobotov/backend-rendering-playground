@@ -4,7 +4,7 @@ const puppeteer = require("puppeteer")
 const app = express()
 
 const batchLimit = 300
-const initialPoolSize = 2 // 16
+const initialPoolSize = 16
 
 class PagePool {
   #browser = null
@@ -19,22 +19,25 @@ class PagePool {
   }
 
   async get() {
-    if (this.#freePagesPool.size < this.#busyPagesPool.size / 4) {
+    // console.log(`free size is ${this.#freePagesPool.length}, busy size is ${this.#busyPagesPool.size}`)
+    if (this.#freePagesPool.length < this.#busyPagesPool.size / 4) {
       this.#populate(this.#busyPagesPool.size)
     }
 
-    if (this.#freePagesPool.size > 0) {
+    if (this.#freePagesPool.length > 0) {
       let page = this.#freePagesPool.shift()
       this.#busyPagesPool.add(page)
+      // console.log(">>>>>> obtained a page")
       return page
     } else {
       await this.#populating
-      return await this.get() // Potetntially could lead to StackOverflow
+      return await this.get() // Potentially could lead to StackOverflow
     }
   }
 
   return(page) {
     if (this.#busyPagesPool.delete(page)) {
+      // console.log("<<<<<< returned a page")
       this.#freePagesPool.push(page)
     }
   }
@@ -42,12 +45,29 @@ class PagePool {
   #populate(size) {
     if (this.#populating != null) return
 
-    const promises = new Array(size)
-    for (let i = 0; i < size; i++) {
-      promises[i] = this.#browser.newPage().then(page => this.#freePagesPool.push(page))
-    }
-    this.#populating = Promise.all(promises).then(_ => this.#populating = null)
+    // console.log(`populating !!!!!!!! ${size}`)
+    this.#populating = parallel(size, async () => {
+      let page = await this.#browser.newPage()
+      // console.log(`new page vvvvvvvv`)
+      this.#freePagesPool.push(page)
+    }).then(_ => this.#populating = null)
   }
+}
+
+async function parallel(times, asyncFn) {  
+  const promises = new Array(times)
+  for (let i = 0; i < times; i++) {
+    promises[i] = asyncFn(i)
+  }
+  return Promise.all(promises)
+}
+
+async function sequence(times, asyncFn) {  
+  const results = new Array(times)
+  for (let i = 0; i < times; i++) {
+    results[i] = await asyncFn(i)
+  }
+  return results
 }
 
 // Default setup:
@@ -56,8 +76,8 @@ class PagePool {
 //  - font family OpenSans
 function measureHeightsWithDefaultSetup(texts) {
   function putText(text) {
-    var div = document.createElement("div");
-  
+    let div = document.createElement("div");
+    
     div.style.width = "600px";
     div.style.fontFamily = "OpenSans";
     div.style.fontSize = "14px";
@@ -68,10 +88,10 @@ function measureHeightsWithDefaultSetup(texts) {
     return div; 
   }
 
-  var containers = texts.map(putText)
-  
-  var results = [];
-  for (let container in containers) {
+  const containers = texts.map(putText)
+
+  const results = [];
+  for (let container of containers) {
     results.push(container.clientHeight);
   }
   return results;
@@ -104,24 +124,30 @@ function measureHeightsWithDefaultSetup(texts) {
 ;(async () => {
   const browser = await puppeteer.launch()
   const pages = new PagePool(browser, initialPoolSize)
-  
-  for (let i = 0; i < 5; i++) {
-    let page = await pages.get()
-    
-    console.time("test render")
-    
-    var result = await page.evaluate(measureHeightsWithDefaultSetup, [
-      "<p>Small test text, really small</p>",
-      "<p>Multiline test text</p><p>Just to check this case</p>",
-      '<p>Das Haus Wettin ist mit über 1000 Jahren Familiengeschichte eines der ältesten urkundlich nachgewiesenen Geschlechter des deutschen <a href="" target="_blank">Hochadels</a>, dem eine historische Bedeutung für die Landesgeschichte der Bundesländer <a href="" target="_blank">Sachsen</a>',
-      "<p>Some <b>bold</b> text just to be sure styling is present and everything is rendered as it shoul <i>be</i></p>"
-    ])
 
-    console.timeEnd("test render")
-    console.log("Received result " + result)
+  const examples = [
+    "<p>Small test text, really small</p>",
+    "<p>Multiline test text</p><p>Just to check this case</p>",
+    '<p>Das Haus Wettin ist mit über 1000 Jahren Familiengeschichte eines der ältesten urkundlich nachgewiesenen Geschlechter des deutschen <a href="" target="_blank">Hochadels</a>, dem eine historische Bedeutung für die Landesgeschichte der Bundesländer <a href="" target="_blank">Sachsen</a>',
+    "<p>Some <b>bold</b> text just to be sure styling is present and everything is rendered as it shoul <i>be</i></p>"
+  ]
+
+  console.time(`test all`)
+  
+  await sequence(100, async (i) => {
+    const page = await pages.get()
+    
+    console.time(`test render #${i}`)
+    
+    const result = await page.evaluate(measureHeightsWithDefaultSetup, examples)
+
+    console.timeEnd(`test render #${i}`)
+    console.log(`Received result #${i}: ${result}`)
 
     pages.return(page)
-  }
+  })
+
+  console.timeEnd(`test all`)
 
   await browser.close();
 })()
