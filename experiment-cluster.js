@@ -1,6 +1,6 @@
 'use strict';
 
-import cluster from "cluster"
+// import cluster from "cluster"
 import { cpus } from "os"
 import express from "express"
 import puppeteer from "puppeteer"
@@ -13,6 +13,12 @@ const port = 3000
 const numCPUs = cpus().length;
 
 // Splitting request per browser/cpu via cluster
+//
+// > pm2 start experiment-cluster.js -i 0
+// > pm2 monit
+// > loadtest http://localhost:3000 -n 100000 -c 10 -m POST
+// > pm2 stop experiment-cluster.js
+//
 // Completed requests:  100000
 // Total errors:        0
 // Total time:          225.197190639 s
@@ -25,22 +31,24 @@ const numCPUs = cpus().length;
 //   95%      28 ms
 //   99%      279 ms
 //  100%      1018 ms (longest request)
+//
+// Resources: ~80MB per worker, max 10% CPU per worker (12 workers)
 ;(async () => {
-  if (cluster.isPrimary) {
-    console.log(`Number of CPUs is ${numCPUs}`)
-    console.log(`Master ${process.pid} is running`)
+  // if (cluster.isPrimary) {
+  //   console.log(`Number of CPUs is ${numCPUs}`)
+  //   console.log(`Master ${process.pid} is running`)
 
-    // Fork workers
-    for (let i = 0; i < numCPUs; i++) {
-      cluster.fork()
-    }
+  //   // Fork workers
+  //   for (let i = 0; i < numCPUs; i++) {
+  //     cluster.fork()
+  //   }
 
-    cluster.on("exit", (worker, code, signal) => {
-      console.log(`worker ${worker.process.pid} died`)
-      console.log("Let's fork another worker!")
-      cluster.fork()
-    })
-  } else {
+  //   cluster.on("exit", (worker, code, signal) => {
+  //     console.log(`worker ${worker.process.pid} died`)
+  //     console.log("Let's fork another worker!")
+  //     cluster.fork()
+  //   })
+  // } else {
     function samplesProvider() {
       return [...new Array(randomNum(1, 20))]
         .map(_ => "<p>" + randomString(30, 400) + "</p>")
@@ -76,7 +84,7 @@ const numCPUs = cpus().length;
     app.listen(port, () => {
       console.log(`App listening on port ${port}`)
     })
-  }
+  // }
 })()
 // ;(async () => {
 //   app.post("/", async (req, res) => {
