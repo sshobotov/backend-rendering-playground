@@ -1,23 +1,29 @@
 const events = require("events")
 const express = require("express")
-const { resolve } = require("path")
 const puppeteer = require("puppeteer")
 
 const app = express()
 
 const batchLimit = 300
-const initialPoolSize = 16
 
-class SingleBrowserInfinitePagesPool {
+class SingleBrowserMultiplePagesPool {
   #browser = null
-  #freePagesPool = []
-  #busyPagesPool = new Set()
   // Promise to wait for if #populate() execution started
   #populating = null
+  #busyPagesPool = new Set()
+  #maxSize = null
+  #queue = new AsyncQueue(null, true)
+  #idx = 0
 
-  constructor(browser, initialSize) {
+  constructor(browser, initialSize, maxSize) {
     this.#browser = browser
+
+    var initialSize = initialSize || 1
     this.#populate(initialSize)
+    
+    if (!isNaN(maxSize) && maxSize >= initialSize) {
+      this.#maxSize = maxSize
+    }
   }
 
   async whenReady() {
@@ -26,30 +32,42 @@ class SingleBrowserInfinitePagesPool {
 
   async get() {
     // console.log(`free size is ${this.#freePagesPool.length}, busy size is ${this.#busyPagesPool.size}`)
-    if (this.#freePagesPool.length < this.#busyPagesPool.size / 4) {
-      this.#populate(this.#busyPagesPool.size)
+    const numberToPopulate = this.#shouldPopulate()
+    if (numberToPopulate > 0) {
+      this.#populate(numberToPopulate)
     }
 
-    if (this.#freePagesPool.length > 0) {
-      let page = this.#freePagesPool.pop()
-      this.#busyPagesPool.add(page)
-      // console.log(">>>>>> obtained a page")
-      return page
-    } else {
-      await this.#populating
-      return this.get() // Potentially could lead to StackOverflow
-    }
+    return this.#queue.dequeue()
+      .then(page => {
+        this.#busyPagesPool.add(page)
+        return page
+      })
   }
 
   return(page) {
     if (this.#busyPagesPool.delete(page)) {
       // console.log("<<<<<< returned a page")
-      this.#freePagesPool.push(page)
+      this.#queue.enqueue(page)
     }
   }
 
   async close() {
+    if (this.#populating != null) await this.#populating
     return this.#browser.close()
+  }
+
+  #shouldPopulate() {
+    let shouldPopulateAhead = this.#queue.size() < this.#busyPagesPool.size / 4
+    if (shouldPopulateAhead && this.#maxSize) {
+      let currentSize = this.#queue.size() + this.#busyPagesPool.size
+      if (currentSize < this.#maxSize) {
+        return Math.min(this.#busyPagesPool.size, this.#maxSize - currentSize) 
+      }
+    }
+    if (shouldPopulateAhead) {
+      return this.#busyPagesPool.size
+    }
+    return 0
   }
 
   #populate(size) {
@@ -58,8 +76,12 @@ class SingleBrowserInfinitePagesPool {
     // console.log(`populating !!!!!!!! ${size}`)
     this.#populating = parallel(size, async () => {
       let page = await this.#browser.newPage()
+      
+      this.#idx++
+      page.id = this.#idx
+      
       // console.log(`new page vvvvvvvv`)
-      this.#freePagesPool.push(page)
+      this.#queue.enqueue(page)
     }).then(_ => this.#populating = null)
   }
 }
@@ -144,6 +166,8 @@ class AsyncQueue {
       return this.#values.shift()
     }
   }
+
+  size() { return this.#values.length }
 }
 
 async function parallel(times, asyncFn) {  
@@ -196,6 +220,10 @@ function measureHeightsWithDefaultSetup(texts) {
   for (let container of containers) {
     results.push(container.clientHeight);
   }
+  // Clean up
+  for (let container of containers) {
+    container.remove();
+  }
   return results;
 }
 
@@ -226,8 +254,14 @@ function measureHeightsWithDefaultSetup(texts) {
 // To verify:
 //   - does same text rendering lead to caching
 ;(async () => {
-  const pages = new SingleBrowserInfinitePagesPool(await puppeteer.launch(), initialPoolSize)
-  // const pages = new FixedBrowsersWithSinglePagePool(async () => puppeteer.launch(), 10) // number of CPUs to utilize, parallelizm
+  console.time(`init`)
+
+  // const pages = new SingleBrowserMultiplePagesPool(await puppeteer.launch(), 8, 8)
+  // parallel n=100000,p=4|39.816s n=100000,p=8|38.840s(2574 batches/s) n=100000,p=10|47.440s n=100000,p=20|51.208s n=100000,p=40|53.649s
+  // sequence n=100000|1:38.321
+  const pages = new FixedBrowsersWithSinglePagePool(async () => puppeteer.launch(), 8)
+  // parallel n=1000,p=8|558.7ms n=1000,p=10|630.8ms n=1000,p=20|848.8ms n=100000,p=8|50.191s n=100000,p=16|1:01.462 n=100000,p=30|56.983s
+  // sequence n=100000|1:34.486
 
   const examples = [
     "<p>Small test text, really small</p>",
@@ -237,10 +271,11 @@ function measureHeightsWithDefaultSetup(texts) {
   ]
 
   await pages.whenReady()
-
+  
+  console.timeEnd(`init`)
   console.time(`test all`)
   
-  await sequence(100, async (i) => {
+  await parallel(100000, async (i) => {
     const page = await pages.get()
     
     console.time(`test render #${i}[page ${page.id}]`)
