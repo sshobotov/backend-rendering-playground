@@ -1,200 +1,14 @@
-const events = require("events")
-const express = require("express")
-const puppeteer = require("puppeteer")
+'use strict';
+
+import express from "express"
+import puppeteer from "puppeteer"
+import { SingleBrowserMultiplePagesPool, FixedBrowsersWithSinglePagePool } from "./pool.js"
+import { replicate } from "./collections.js"
+import { sequence, parallel } from "./concurrency.js"
 
 const app = express()
 
 const batchLimit = 300
-
-class SingleBrowserMultiplePagesPool {
-  #browser = null
-  // Promise to wait for if #populate() execution started
-  #populating = null
-  #busyPagesPool = new Set()
-  #maxSize = null
-  #queue = new AsyncQueue(null, true)
-  #idx = 0
-
-  constructor(browser, initialSize, maxSize) {
-    this.#browser = browser
-
-    var initialSize = initialSize || 1
-    this.#populate(initialSize)
-    
-    if (!isNaN(maxSize) && maxSize >= initialSize) {
-      this.#maxSize = maxSize
-    }
-  }
-
-  async whenReady() {
-    await this.populating
-  }
-
-  async get() {
-    // console.log(`free size is ${this.#freePagesPool.length}, busy size is ${this.#busyPagesPool.size}`)
-    const numberToPopulate = this.#shouldPopulate()
-    if (numberToPopulate > 0) {
-      this.#populate(numberToPopulate)
-    }
-
-    return this.#queue.dequeue()
-      .then(page => {
-        this.#busyPagesPool.add(page)
-        return page
-      })
-  }
-
-  return(page) {
-    if (this.#busyPagesPool.delete(page)) {
-      // console.log("<<<<<< returned a page")
-      this.#queue.enqueue(page)
-    }
-  }
-
-  async close() {
-    if (this.#populating != null) await this.#populating
-    return this.#browser.close()
-  }
-
-  #shouldPopulate() {
-    let shouldPopulateAhead = this.#queue.size() < this.#busyPagesPool.size / 4
-    if (shouldPopulateAhead && this.#maxSize) {
-      let currentSize = this.#queue.size() + this.#busyPagesPool.size
-      if (currentSize < this.#maxSize) {
-        return Math.min(this.#busyPagesPool.size, this.#maxSize - currentSize) 
-      }
-    }
-    if (shouldPopulateAhead) {
-      return this.#busyPagesPool.size
-    }
-    return 0
-  }
-
-  #populate(size) {
-    if (this.#populating != null) return
-
-    // console.log(`populating !!!!!!!! ${size}`)
-    this.#populating = parallel(size, async () => {
-      let page = await this.#browser.newPage()
-      
-      this.#idx++
-      page.id = this.#idx
-      
-      // console.log(`new page vvvvvvvv`)
-      this.#queue.enqueue(page)
-    }).then(_ => this.#populating = null)
-  }
-}
-
-class FixedBrowsersWithSinglePagePool {
-  #browsers = []
-  #busyPagesPool = new Set()
-  // Promise to wait for if #populate()
-  #ready = null
-  #queue = new AsyncQueue(null, true)
-
-  constructor(asyncGetBrowser, size) {
-    this.#populate(asyncGetBrowser, size)
-  }
-
-  async whenReady() {
-    await this.#ready
-  }
-
-  async get() {
-    return this.#queue.dequeue()
-      .then(page => {
-        this.#busyPagesPool.add(page)
-        // console.log(`>>>>>> obtained a page ${page.id}`)
-        
-        return page
-      })
-  }
-
-  return(page) {
-    if (this.#busyPagesPool.delete(page)) {
-      // console.log("<<<<<< returned a page")
-      this.#queue.enqueue(page)
-    }
-  }
-
-  async close() {
-    await parallel(this.#browsers.length, async (i) => this.#browsers[i].close())
-  }
-
-  #populate(asyncGetBrowser, size) {
-    this.#ready = parallel(size, async (i) => {
-      const browser = await asyncGetBrowser(i)
-      const page = await browser.newPage()
-      page.id = i
-      
-      this.#browsers.push(browser)
-      this.#queue.enqueue(page)
-    })
-  }
-}
-
-class AsyncQueue {
-  #values = []
-  #resolvers = []
-  #readFreshValues = false
-
-  constructor(values, readFreshValues) {
-    if (Array.isArray(values)) {
-      this.#values = values
-    }
-    this.#readFreshValues = !!readFreshValues
-  }
-
-  enqueue(value) {
-    if (this.#resolvers.length == 0) {
-      this.#values.push(value)
-    } else {
-      const resolve = this.#resolvers.shift()
-      resolve(value)
-    }
-  }
-
-  async dequeue() {
-    if (this.#values.length == 0) {
-      return new Promise((resolve) => {
-        this.#resolvers.push(resolve)
-      })
-    } else if (this.#readFreshValues) {
-      return this.#values.pop()
-    } else {
-      return this.#values.shift()
-    }
-  }
-
-  size() { return this.#values.length }
-}
-
-async function parallel(times, asyncFn) {  
-  const promises = new Array(times)
-  for (let i = 0; i < times; i++) {
-    promises[i] = asyncFn(i)
-  }
-  return Promise.all(promises)
-}
-
-async function sequence(times, asyncFn) {  
-  const results = new Array(times)
-  for (let i = 0; i < times; i++) {
-    results[i] = await asyncFn(i)
-  }
-  return results
-}
-
-function replicate(seq, num) {
-  const size = seq.length
-
-  var result = []
-  for (let i = 0; i < num; i++) {
-    result = result.concat(seq)
-  }
-  return result
-}
 
 // Default setup:
 //  - default paddings, margins, thikness etc.
@@ -251,6 +65,9 @@ function measureHeightsWithDefaultSetup(texts) {
 //   console.log("Server stopped")
 // })()
 
+// Notes:
+//  - if services dies browsers will leave without explicit shutdown
+
 // To verify:
 //   - does same text rendering lead to caching
 ;(async () => {
@@ -260,7 +77,9 @@ function measureHeightsWithDefaultSetup(texts) {
   // parallel n=100000,p=4|39.816s n=100000,p=8|38.840s(2574 batches/s) n=100000,p=10|47.440s n=100000,p=20|51.208s n=100000,p=40|53.649s
   // sequence n=100000|1:38.321
   const pages = new FixedBrowsersWithSinglePagePool(async () => puppeteer.launch(), 8)
-  // parallel n=1000,p=8|558.7ms n=1000,p=10|630.8ms n=1000,p=20|848.8ms n=100000,p=8|50.191s n=100000,p=16|1:01.462 n=100000,p=30|56.983s
+  // parallel texts=4 n=1000,p=8|558.7ms n=1000,p=10|630.8ms n=1000,p=20|848.8ms n=100000,p=8|50.191s n=100000,p=16|1:01.462 n=100000,p=30|56.983s
+  // parallel texts=26 n=100000,p=8|2:00.042
+  // parallel texts=26 scripts=2 n=100000,p=8|4:34.084
   // sequence n=100000|1:34.486
 
   const examples = [
@@ -275,12 +94,12 @@ function measureHeightsWithDefaultSetup(texts) {
   console.timeEnd(`init`)
   console.time(`test all`)
   
-  await parallel(100000, async (i) => {
+  await parallel(100, async (i) => {
     const page = await pages.get()
     
     console.time(`test render #${i}[page ${page.id}]`)
     
-    const result = await page.evaluate(measureHeightsWithDefaultSetup, examples)
+    const result = await page.evaluate(measureHeightsWithDefaultSetup, replicate(examples, 6))
 
     console.timeEnd(`test render #${i}[page ${page.id}]`)
     // console.log(`Received result #${i}: ${result}`)
