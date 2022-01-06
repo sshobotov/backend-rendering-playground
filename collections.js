@@ -7,3 +7,21 @@ export function replicate(seq, num) {
   }
   return result
 }
+
+export class CircularPool {
+  #items = []
+  #size = 0
+  #curr = 0
+
+  constructor(items) {
+    this.#items = items
+    this.#size = items.length
+  }
+
+  get() {
+    let item = this.#items[this.#curr]
+    this.#curr = (this.#curr + 1) % this.#size
+
+    return item
+  }
+}

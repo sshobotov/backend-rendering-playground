@@ -5,6 +5,8 @@ import { cpus } from "os"
 import express from "express"
 import puppeteer from "puppeteer"
 import { randomString, randomNum } from "./random.js"
+import { parallel } from "./concurrency.js"
+import { CircularPool } from "./collections.js"
 import { measureHeightsWithDefaultSetup } from "./render.js"
 
 const port = 3000
@@ -47,6 +49,13 @@ const numCPUs = cpus().length;
     const app = express()
     const browser = await puppeteer.launch()
     const page = await browser.newPage()
+    // Rotating multiple pages gives no benefits
+    // const pages = new CircularPool(await parallel(10, async (i) => {
+    //   let page = await browser.newPage()
+    //   page.id = i
+
+    //   return page
+    // }))
 
     process.on('exit', (code) => {
       console.log("Shutting down the browser")
@@ -56,9 +65,10 @@ const numCPUs = cpus().length;
     console.log(`Worker ${process.pid} started`)
 
     app.post("/", async (req, res) => {
+      // const page = pages.get()
       const samples = samplesProvider()
       const results = await page.evaluate(measureHeightsWithDefaultSetup, samples)
-      // console.log(`results for [pid=${process.pid}] smaples=${samples.length}: ${results}`)
+      // console.log(`results for [pid=${process.pid},page=${page.id}] smaples=${samples.length}: ${results}`)
 
       res.send()
     })
