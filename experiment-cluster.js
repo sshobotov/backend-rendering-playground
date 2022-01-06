@@ -16,8 +16,14 @@ const numCPUs = cpus().length;
 //
 // > pm2 start experiment-cluster.js -i 0
 // > pm2 monit
+//
 // > loadtest http://localhost:3000 -n 100000 -c 10 -m POST
+// or
+// > ab -n 100000 -c 10 -m POST http://localhost:3000/
+//
 // > pm2 stop experiment-cluster.js
+//
+// - loadtest (npm package):
 //
 // Completed requests:  100000
 // Total errors:        0
@@ -32,7 +38,67 @@ const numCPUs = cpus().length;
 //   99%      279 ms
 //  100%      1018 ms (longest request)
 //
-// Resources: ~80MB per worker, max 10% CPU per worker (12 workers)
+// - ab (-c 10):
+//
+// Time taken for tests:   202.168 seconds
+// Complete requests:      100000
+// Failed requests:        0
+// Total transferred:      9800000 bytes
+// HTML transferred:       0 bytes
+// Requests per second:    494.64 [#/sec] (mean)
+// Time per request:       20.217 [ms] (mean)
+// Time per request:       2.022 [ms] (mean, across all concurrent requests)
+// Transfer rate:          47.34 [Kbytes/sec] received
+
+// Connection Times (ms)
+//               min  mean[+/-sd] median   max
+// Connect:        0    6 128.6      1   11006
+// Processing:     2   14  48.0      8    1507
+// Waiting:        1   13  47.6      7    1505
+// Total:          2   20 137.0      9   11018
+
+// Percentage of the requests served within a certain time (ms)
+//   50%      9
+//   66%     11
+//   75%     12
+//   80%     13
+//   90%     19
+//   95%     33
+//   98%     60
+//   99%    251
+//  100%  11018 (longest request)
+//
+// - ab (-c 2):
+//
+// Time taken for tests:   232.635 seconds
+// Complete requests:      100000
+// Failed requests:        0
+// Total transferred:      9800000 bytes
+// HTML transferred:       0 bytes
+// Requests per second:    429.86 [#/sec] (mean)
+// Time per request:       4.653 [ms] (mean)
+// Time per request:       2.326 [ms] (mean, across all concurrent requests)
+// Transfer rate:          41.14 [Kbytes/sec] received
+
+// Connection Times (ms)
+//               min  mean[+/-sd] median   max
+// Connect:        0    1   7.2      0    1000
+// Processing:     1    4  13.6      3     641
+// Waiting:        1    4  13.3      3     641
+// Total:          2    5  15.4      4    1005
+
+// Percentage of the requests served within a certain time (ms)
+//   50%      4
+//   66%      4
+//   75%      4
+//   80%      5
+//   90%      5
+//   95%      6
+//   98%      7
+//   99%      8
+//  100%   1005 (longest request)
+//
+// Resources: ~80MB per worker, max 13% CPU per worker (12 workers)
 ;(async () => {
   // if (cluster.isPrimary) {
   //   console.log(`Number of CPUs is ${numCPUs}`)
