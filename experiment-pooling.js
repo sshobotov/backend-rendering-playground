@@ -1,77 +1,16 @@
 'use strict';
 
-import express from "express"
 import puppeteer from "puppeteer"
-import { SingleBrowserMultiplePagesPool, FixedBrowsersWithSinglePagePool } from "./pool.js"
+import { SingleBrowserMultiplePagesPool, FixedBrowsersWithSinglePagePool } from "./pools.js"
 import { replicate } from "./collections.js"
 import { sequence, parallel } from "./concurrency.js"
 import { randomString, randomNum } from "./random.js"
-
-const app = express()
-
-const batchLimit = 300
-
-// Default setup:
-//  - default paddings, margins, thikness etc.
-//  - text max width 600px
-//  - font family OpenSans
-function measureHeightsWithDefaultSetup(texts) {
-  function putText(text) {
-    let div = document.createElement("div");
-    
-    div.style.width = "600px";
-    div.style.fontFamily = "OpenSans";
-    div.style.fontSize = "14px";
-    div.innerHTML = text;
-  
-    document.body.append(div);
-
-    return div; 
-  }
-
-  const containers = texts.map(putText)
-
-  const results = [];
-  for (let container of containers) {
-    results.push(container.clientHeight);
-  }
-  // Clean up
-  for (let container of containers) {
-    container.remove();
-  }
-  return results;
-}
-
-// ;(async () => {
-//   const browser = await puppeteer.launch()
-//   const pages = new PagePool(browser, initialPoolSize)
-
-//   app.post("/", async (req, res) => {
-//     const texts = req.body.texts
-    
-//     if (!Array.isArray(texts) || !texts.every(text => typeof text == "string"))
-//       return res.status(400).json({error: 'Invalid request: expected "texts" parameter as an array of strings'})
-
-//     const batch = req.body.batch || 0
-
-//     if (typeof batch != "number" || batch < 1 || batch > batchLimit)
-//       return res.status(400).json({error: `Invalid request: expected "batch" parameter to be an integer in [1,$batchLimit] range`})
-
-//     const page = await pages.get()
-//   })
-
-//   app.listen(() => console.log("Server started"))
-  
-//   await browser.close()
-//   console.log("Server stopped")
-// })()
+import { measureHeightsWithDefaultSetup } from "./render.js";
 
 // Notes:
 //  - if services dies browsers will leave without explicit shutdown
 //  - caching on V8/browser/? impacts rendering the same text
 
-// To verify:
-//   - having Node cluster setup with a browser per Worker
 // Experimenting with Browser/Page pools in one app to mitigate parallelism 
 ;(async () => {
   console.time(`init`)
