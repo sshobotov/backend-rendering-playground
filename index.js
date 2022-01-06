@@ -31,7 +31,7 @@ class SingleBrowserInfinitePagesPool {
     }
 
     if (this.#freePagesPool.length > 0) {
-      let page = this.#freePagesPool.shift()
+      let page = this.#freePagesPool.pop()
       this.#busyPagesPool.add(page)
       // console.log(">>>>>> obtained a page")
       return page
@@ -226,8 +226,8 @@ function measureHeightsWithDefaultSetup(texts) {
 // To verify:
 //   - does same text rendering lead to caching
 ;(async () => {
-  // const pages = new SingleBrowserInfinitePagesPool(await puppeteer.launch(), initialPoolSize)
-  const pages = new FixedBrowsersWithSinglePagePool(async () => puppeteer.launch(), 10) // number of CPUs to utilize, parallelizm
+  const pages = new SingleBrowserInfinitePagesPool(await puppeteer.launch(), initialPoolSize)
+  // const pages = new FixedBrowsersWithSinglePagePool(async () => puppeteer.launch(), 10) // number of CPUs to utilize, parallelizm
 
   const examples = [
     "<p>Small test text, really small</p>",
@@ -240,7 +240,7 @@ function measureHeightsWithDefaultSetup(texts) {
 
   console.time(`test all`)
   
-  await parallel(100, async (i) => {
+  await sequence(100, async (i) => {
     const page = await pages.get()
     
     console.time(`test render #${i}[page ${page.id}]`)
