@@ -1,4 +1,6 @@
+const events = require("events")
 const express = require("express")
+const { resolve } = require("path")
 const puppeteer = require("puppeteer")
 
 const app = express()
@@ -6,7 +8,7 @@ const app = express()
 const batchLimit = 300
 const initialPoolSize = 16
 
-class PagePool {
+class SingleBrowserInfinitePagesPool {
   #browser = null
   #freePagesPool = []
   #busyPagesPool = new Set()
@@ -16,6 +18,10 @@ class PagePool {
   constructor(browser, initialSize) {
     this.#browser = browser
     this.#populate(initialSize)
+  }
+
+  async whenReady() {
+    await this.populating
   }
 
   async get() {
@@ -31,7 +37,7 @@ class PagePool {
       return page
     } else {
       await this.#populating
-      return await this.get() // Potentially could lead to StackOverflow
+      return this.get() // Potentially could lead to StackOverflow
     }
   }
 
@@ -40,6 +46,10 @@ class PagePool {
       // console.log("<<<<<< returned a page")
       this.#freePagesPool.push(page)
     }
+  }
+
+  async close() {
+    return this.#browser.close()
   }
 
   #populate(size) {
@@ -51,6 +61,88 @@ class PagePool {
       // console.log(`new page vvvvvvvv`)
       this.#freePagesPool.push(page)
     }).then(_ => this.#populating = null)
+  }
+}
+
+class FixedBrowsersWithSinglePagePool {
+  #browsers = []
+  #busyPagesPool = new Set()
+  // Promise to wait for if #populate()
+  #ready = null
+  #queue = new AsyncQueue(null, true)
+
+  constructor(asyncGetBrowser, size) {
+    this.#populate(asyncGetBrowser, size)
+  }
+
+  async whenReady() {
+    await this.#ready
+  }
+
+  async get() {
+    return this.#queue.dequeue()
+      .then(page => {
+        this.#busyPagesPool.add(page)
+        // console.log(`>>>>>> obtained a page ${page.id}`)
+        
+        return page
+      })
+  }
+
+  return(page) {
+    if (this.#busyPagesPool.delete(page)) {
+      // console.log("<<<<<< returned a page")
+      this.#queue.enqueue(page)
+    }
+  }
+
+  async close() {
+    await parallel(this.#browsers.length, async (i) => this.#browsers[i].close())
+  }
+
+  #populate(asyncGetBrowser, size) {
+    this.#ready = parallel(size, async (i) => {
+      const browser = await asyncGetBrowser(i)
+      const page = await browser.newPage()
+      page.id = i
+      
+      this.#browsers.push(browser)
+      this.#queue.enqueue(page)
+    })
+  }
+}
+
+class AsyncQueue {
+  #values = []
+  #resolvers = []
+  #readFreshValues = false
+
+  constructor(values, readFreshValues) {
+    if (Array.isArray(values)) {
+      this.#values = values
+    }
+    this.#readFreshValues = !!readFreshValues
+  }
+
+  enqueue(value) {
+    if (this.#resolvers.length == 0) {
+      this.#values.push(value)
+    } else {
+      const resolve = this.#resolvers.shift()
+      resolve(value)
+    }
+  }
+
+  async dequeue() {
+    if (this.#values.length == 0) {
+      return new Promise((resolve) => {
+        this.#resolvers.push(resolve)
+      })
+    } else if (this.#readFreshValues) {
+      return this.#values.pop()
+    } else {
+      return this.#values.shift()
+    }
   }
 }
 
@@ -68,6 +160,16 @@ async function sequence(times, asyncFn) {
     results[i] = await asyncFn(i)
   }
   return results
+}
+
+function replicate(seq, num) {
+  const size = seq.length
+
+  var result = []
+  for (let i = 0; i < num; i++) {
+    result = result.concat(seq)
+  }
+  return result
 }
 
 // Default setup:
@@ -121,9 +223,11 @@ function measureHeightsWithDefaultSetup(texts) {
 //   console.log("Server stopped")
 // })()
 
+// To verify:
+//   - does same text rendering lead to caching
 ;(async () => {
-  const browser = await puppeteer.launch()
-  const pages = new PagePool(browser, initialPoolSize)
+  // const pages = new SingleBrowserInfinitePagesPool(await puppeteer.launch(), initialPoolSize)
+  const pages = new FixedBrowsersWithSinglePagePool(async () => puppeteer.launch(), 10) // number of CPUs to utilize, parallelizm
 
   const examples = [
     "<p>Small test text, really small</p>",
@@ -132,22 +236,24 @@ function measureHeightsWithDefaultSetup(texts) {
     "<p>Some <b>bold</b> text just to be sure styling is present and everything is rendered as it shoul <i>be</i></p>"
   ]
 
+  await pages.whenReady()
+
   console.time(`test all`)
   
-  await sequence(100, async (i) => {
+  await parallel(100, async (i) => {
     const page = await pages.get()
     
-    console.time(`test render #${i}`)
+    console.time(`test render #${i}[page ${page.id}]`)
     
     const result = await page.evaluate(measureHeightsWithDefaultSetup, examples)
 
-    console.timeEnd(`test render #${i}`)
-    console.log(`Received result #${i}: ${result}`)
+    console.timeEnd(`test render #${i}[page ${page.id}]`)
+    // console.log(`Received result #${i}: ${result}`)
 
     pages.return(page)
   })
 
   console.timeEnd(`test all`)
 
-  await browser.close();
+  await pages.close();
 })()
