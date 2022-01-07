@@ -17,9 +17,84 @@ const numCPUs = cpus().length;
 // > pm2 start experiment-cluster.js -i 0
 // > pm2 monit
 //
-// > loadtest http://localhost:3000 -n 100000 -c 10 -m POST
-// or
-// > ab -n 100000 -c 10 -m POST http://localhost:3000/
+// > ab -n 100000 -c 10 -m POST -k http://localhost:3000/
+//
+// > pm2 stop experiment-cluster.js
+//
+;(async () => {
+  // if (cluster.isPrimary) {
+  //   console.log(`Number of CPUs is ${numCPUs}`)
+  //   console.log(`Master ${process.pid} is running`)
+
+  //   // Fork workers
+  //   for (let i = 0; i < numCPUs; i++) {
+  //     cluster.fork()
+  //   }
+
+  //   cluster.on("exit", (worker, code, signal) => {
+  //     console.log(`worker ${worker.process.pid} died`)
+  //     console.log("Let's fork another worker!")
+  //     cluster.fork()
+  //   })
+  // } else {
+    function samplesProvider() {
+      return [...new Array(randomNum(1, 20))]
+        .map(_ => "<p>" + randomString(30, 400) + "</p>")
+    }
+
+    // for 20 we have the most reasonable results when loadtesting, influence memory usage
+    const pagePoolSize = parseInt(process.env.PAGE_POOL_SIZE || "10", 10)
+    const app = express()
+    const browser = await puppeteer.launch()
+    // const page = await browser.newPage()
+    // Rotating multiple pages for one browser improves performance, please see results bellow the code
+    // but is needed only if browser and pages pool is kept in memory
+    const pages = new CircularPool(await parallel(pagePoolSize, async (i) => {
+      let page = await browser.newPage()
+      page.id = i
+
+      return page
+    }))
+    console.log(`Started pool of pages with size: ${pagePoolSize}`)
+
+    process.on('exit', (code) => {
+      console.log("Shutting down the browser")
+      browser.close()
+    })
+    
+    console.log(`Worker ${process.pid} started`)
+
+    app.post("/", async (req, res) => {
+      const page = pages.get()
+      const samples = samplesProvider()
+      const results = await page.evaluate(measureHeightsWithDefaultSetup, samples)
+      // console.log(`results for [pid=${process.pid},page=${page.id}] smaples=${samples.length}: ${results}`)
+
+      res.send()
+    })
+
+    app.listen(port, () => {
+      console.log(`App listening on port ${port}`)
+    })
+  // }
+})()
+//
+// ;(async () => {
+//   app.post("/", async (req, res) => {
+//     const texts = req.body.texts
+    
+//     if (!Array.isArray(texts) || !texts.every(text => typeof text == "string"))
+//       return res.status(400).json({error: 'Invalid request: expected "texts" parameter as an array of strings'})
+
+//     const batch = req.body.batch || 0
+
+//     if (typeof batch != "number" || batch < 1 || batch > batchLimit)
+//       return res.status(400).json({error: `Invalid request: expected "batch" parameter to be an integer in [1,$batchLimit] range`})
+//   })
+// })()
+//
+//
+// Results
 //
 // - ab (no keep-alive):
 //
@@ -242,71 +317,3 @@ const numCPUs = cpus().length;
 //  100%   9347 (longest request)
 //
 // Going -c >130 can't be handled, connections was dropped
-//
-;(async () => {
-  // if (cluster.isPrimary) {
-  //   console.log(`Number of CPUs is ${numCPUs}`)
-  //   console.log(`Master ${process.pid} is running`)
-
-  //   // Fork workers
-  //   for (let i = 0; i < numCPUs; i++) {
-  //     cluster.fork()
-  //   }
-
-  //   cluster.on("exit", (worker, code, signal) => {
-  //     console.log(`worker ${worker.process.pid} died`)
-  //     console.log("Let's fork another worker!")
-  //     cluster.fork()
-  //   })
-  // } else {
-    function samplesProvider() {
-      return [...new Array(randomNum(1, 20))]
-        .map(_ => "<p>" + randomString(30, 400) + "</p>")
-    }
-
-    const pagePoolSize = parseInt(process.env.PAGE_POOL_SIZE || "1", 10)
-    const app = express()
-    const browser = await puppeteer.launch()
-    // const page = await browser.newPage()
-    // Rotating multiple pages gives no benefits
-    const pages = new CircularPool(await parallel(pagePoolSize, async (i) => {
-      let page = await browser.newPage()
-      page.id = i
-
-      return page
-    }))
-
-    process.on('exit', (code) => {
-      console.log("Shutting down the browser")
-      browser.close()
-    })
-    
-    console.log(`Worker ${process.pid} started`)
-
-    app.post("/", async (req, res) => {
-      const page = pages.get()
-      const samples = samplesProvider()
-      const results = await page.evaluate(measureHeightsWithDefaultSetup, samples)
-      // console.log(`results for [pid=${process.pid},page=${page.id}] smaples=${samples.length}: ${results}`)
-
-      res.send()
-    })
-
-    app.listen(port, () => {
-      console.log(`App listening on port ${port}`)
-    })
-  // }
-})()
-// ;(async () => {
-//   app.post("/", async (req, res) => {
-//     const texts = req.body.texts
-    
-//     if (!Array.isArray(texts) || !texts.every(text => typeof text == "string"))
-//       return res.status(400).json({error: 'Invalid request: expected "texts" parameter as an array of strings'})
-
-//     const batch = req.body.batch || 0
-
-//     if (typeof batch != "number" || batch < 1 || batch > batchLimit)
-//       return res.status(400).json({error: `Invalid request: expected "batch" parameter to be an integer in [1,$batchLimit] range`})
-//   })
-// })()
