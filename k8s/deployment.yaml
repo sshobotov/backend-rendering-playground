@@ -6,7 +6,7 @@ spec:
   selector:
     matchLabels:
       app: render-server
-  replicas: 8
+  replicas: 1
   template:
     metadata:
       labels:
@@ -20,10 +20,10 @@ spec:
           resources:
             requests:
               memory: "500Mi"
-              cpu: "600m"
+              cpu: "2000m"
             limits:
               memory: "500Mi"
-              cpu: "600m"
+              cpu: "2000m"
 # > kubectl apply -f k8s/deployment.yaml
 # > kubectl expose deployment render-server-deployment --type=LoadBalancer --port=8080 --target-port=3000
 # (if not using a service, see https://minikube.sigs.k8s.io/docs/handbook/accessing/)
