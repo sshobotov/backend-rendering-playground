@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: render-server-service
+spec:
+  selector:
+    app: render-server
+  type: LoadBalancer 
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+      nodePort: 31000
+# > kubectl apply -f k8s/service.yaml
