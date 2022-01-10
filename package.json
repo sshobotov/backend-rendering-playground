@@ -5,9 +5,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node experiment-cluster.js"
+    "start": "node experiment-k8s.js"
   },
-  "author": "",
+  "author": "sshobotov",
   "license": "ISC",
   "dependencies": {
     "express": "^4.17.2",

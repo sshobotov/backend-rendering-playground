@@ -38,8 +38,11 @@ const numCPUs = cpus().length;
   //   })
   // } else {
     function samplesProvider() {
-      return [...new Array(randomNum(1, 20))]
-        .map(_ => "<p>" + randomString(30, 400) + "</p>")
+      var samples = []
+      for (let i = 0; i < randomNum(1, 20); i++) {
+        samples.push("<p>" + randomString(30, 400) + "</p>")
+      }
+      return samples
     }
 
     // for 20 we have the most reasonable results when loadtesting, influence memory usage
