@@ -1,5 +1,6 @@
 'use strict';
 
+import { EventEmitter } from "events"
 import express from "express"
 import puppeteer from "puppeteer"
 import { randomString, randomNum } from "./random.js"
@@ -13,29 +14,98 @@ function samplesProvider() {
   return samples
 }
 
+/**
+ * Keeps browser and page instances up and running 
+ */
+class PageResolver {
+  #eventEmitter = new EventEmitter()
+  #puppeteer = null
+  #browser = null
+  #page = null
+
+  constructor(puppeteer) {
+    this.#puppeteer = puppeteer
+    this.#browser = this.#newBrowser()
+    this.#page = this.#newPage()
+
+    this.#eventEmitter.on("browser", () => {
+      this.#browser = this.#newBrowser()
+      this.#page = this.#newPage()
+    })
+
+    this.#eventEmitter.on("page", () => {
+      this.#page = this.#newPage()
+    })
+  }
+
+  async shutdown() {
+    this.#eventEmitter.removeAllListeners()
+    const browser = await this.#browser
+    await browser.close()
+  }
+
+  async resolve() {
+    return this.#page
+  }
+
+  async #newBrowser() {
+    const browser = await this.#puppeteer.launch({
+      args: ["--no-sandbox"]
+    })
+    browser.once("disconnected", () => this.#eventEmitter.emit("browser"))
+
+    return browser
+  }
+
+  async #newPage() {
+    const browser = await this.#browser
+    const page = await browser.newPage()
+    page.once("error", () => this.#eventEmitter.emit("page"))
+    
+    return page
+  }
+}
+
 const port = 3000
 
 ;(async () => {
   const app = express()
-  const browser = await puppeteer.launch({
-    args: ["--no-sandbox"]
+  const pageResolver = new PageResolver(puppeteer)
+  
+  var isServiceReady = false
+  pageResolver.resolve().then(() => {
+    isServiceReady = true
   })
-  const page = await browser.newPage()
 
   process.on('exit', (code) => {
     console.log("Shutting down the browser")
-    browser.close()
+    pageResolver.shutdown()
   })
 
+  app.use(express.json())
+
   app.post("/", async (req, res) => {
-    const samples = samplesProvider()
-    const results = await page.evaluate(measureHeightsWithDefaultSetup, samples)
+    var texts = req.body.texts
+
+    const generate = !!req.query.generate
+    if (!texts && generate) {
+      // Keeping fixture generation on the service for test simplicity
+      texts = samplesProvider()
+    } else if (!Array.isArray(texts) || !texts.every(text => typeof text == "string")) {
+      return res.status(400).json({error: 'Invalid request: expected "texts" parameter as an array of strings'})
+    }
+
+    const page = await pageResolver.resolve()
+    const results = await page.evaluate(measureHeightsWithDefaultSetup, texts)
 
     res.json({"success": results})
   })
 
-  app.post("/healthz", (req, res) => {
-    res.send()
+  app.get("/healthz", (req, res) => {
+    if (isServiceReady)
+      res.send()
+    else
+      res.status(500).send()
   })
 
   app.listen(port, () => {
