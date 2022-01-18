@@ -6,9 +6,25 @@ import puppeteer from "puppeteer"
 import { randomString, randomNum } from "./random.js"
 import { measureHeightsWithDefaultSetup } from "./render.js"
 
+/**
+ * This file provides HTTP server with utilities to run tests for server-side rendering
+ * 
+ * Supported API:
+ * - render texts and return their heights with randomly generated batch of texts by the server itself (less fair but easier to use) 
+ *   curl -XPOST 'localhost:3000/?generate=true'
+ * - render texts and return their heights from JSON payload
+ *   curl -XPOST localhost:3000/ -H 'Content-Type: application/json' -d '{"texts": ["<p>Do it! What is a height for</p><p>this nice text?</p>"]}'
+ */
+
+ const port = 3000
+
+// Provides random set of texts to be used as a payload
 function samplesProvider() {
+  // Fixed size, for emulating the real load could be randomized
+  const batchSize = 40 // randomNum(1, 20)
+
   var samples = []
-  for (let i = 0; i < randomNum(1, 20); i++) {
+  for (let i = 0; i < batchSize; i++) {
     samples.push("<p>" + randomString(30, 400) + "</p>")
   }
   return samples
@@ -65,8 +81,6 @@ class PageResolver {
     return page
   }
 }
-
-const port = 3000
 
 ;(async () => {
   const app = express()
